@@ -197,14 +197,18 @@ class TextureGenerator:
         img = PIL.Image.new('RGB', (size, size))
         pixels = img.load()
         
+        # Pre-generate random values for performance
+        noise_values = [[random.randint(-15, 15) for _ in range(size)] for _ in range(size)]
+        grass_patterns = [[random.random() < 0.3 for _ in range(size)] for _ in range(size)]
+
         for y in range(size):
             for x in range(size):
                 # Base green color with variation
                 base_green = random.randint(40, 80)
-                noise = random.randint(-15, 15)
+                noise = noise_values[y][x]
                 
                 # Add grass blade patterns
-                if random.random() < 0.3:
+                if grass_patterns[y][x]:
                     r = max(0, min(255, base_green + noise + 20))
                     g = max(0, min(255, base_green * 2 + noise + 40))
                     b = max(0, min(255, base_green + noise))
@@ -222,10 +226,13 @@ class TextureGenerator:
         img = PIL.Image.new('RGB', (size, size))
         pixels = img.load()
         
+        # Pre-generate random values for performance
+        noise_values = [[random.randint(-20, 20) for _ in range(size)] for _ in range(size)]
+
         for y in range(size):
             for x in range(size):
                 base_brown = random.randint(80, 120)
-                noise = random.randint(-20, 20)
+                noise = noise_values[y][x]
                 
                 r = max(0, min(255, base_brown + noise + 20))
                 g = max(0, min(255, base_brown * 0.7 + noise))
@@ -240,15 +247,19 @@ class TextureGenerator:
         img = PIL.Image.new('RGB', (size, size))
         pixels = img.load()
         
+        # Pre-generate random values for performance
+        noise_values = [[random.randint(-30, 30) for _ in range(size)] for _ in range(size)]
+        grain_patterns = [[random.random() < 0.1 for _ in range(size)] for _ in range(size)]
+
         for y in range(size):
             for x in range(size):
                 base_gray = random.randint(100, 150)
-                noise = random.randint(-30, 30)
+                noise = noise_values[y][x]
                 
                 r = g = b = max(0, min(255, base_gray + noise))
                 
                 # Add stone grain
-                if random.random() < 0.1:
+                if grain_patterns[y][x]:
                     darker = max(0, base_gray - 40)
                     r = g = b = darker
                 
@@ -280,12 +291,16 @@ class TextureGenerator:
         img = PIL.Image.new('RGB', (size, size))
         pixels = img.load()
         
+        # Pre-generate random values for performance
+        base_greens = [[random.randint(30, 60) for _ in range(size)] for _ in range(size)]
+        leaf_patterns = [[random.random() < 0.8 for _ in range(size)] for _ in range(size)]
+
         for y in range(size):
             for x in range(size):
-                base_green = random.randint(30, 60)
+                base_green = base_greens[y][x]
                 
                 # Leaf pattern with transparency simulation
-                if random.random() < 0.8:
+                if leaf_patterns[y][x]:
                     r = max(0, min(255, base_green - 10))
                     g = max(0, min(255, base_green + 30))
                     b = max(0, min(255, base_green - 5))
@@ -302,10 +317,13 @@ class TextureGenerator:
         img = PIL.Image.new('RGB', (size, size))
         pixels = img.load()
         
+        # Pre-generate random values for performance
+        noise_values = [[random.randint(-10, 10) for _ in range(size)] for _ in range(size)]
+
         for y in range(size):
             for x in range(size):
                 base_sand = random.randint(200, 230)
-                noise = random.randint(-10, 10)
+                noise = noise_values[y][x]
                 
                 r = max(0, min(255, base_sand + noise + 20))
                 g = max(0, min(255, base_sand + noise + 10))
@@ -383,6 +401,9 @@ class TextureGenerator:
         
         noise = PerlinNoise(octaves=3, seed=random.randint(1, 1000))
         
+        # Pre-generate random values for performance
+        rand_values = [[random.randint(-10, 10) for _ in range(size)] for _ in range(size)]
+
         for y in range(size):
             for x in range(size):
                 # Generate cloud pattern using Perlin noise
@@ -394,7 +415,7 @@ class TextureGenerator:
                     alpha = int((val - 0.3) * 255 * 2)
                     alpha = min(255, alpha)
                     # White clouds with slight variation
-                    base = 240 + random.randint(-10, 10)
+                    base = 240 + rand_values[y][x]
                     r = g = b = max(0, min(255, base))
                     pixels[x, y] = (r, g, b, alpha)
                 else:
@@ -408,14 +429,19 @@ class TextureGenerator:
         img = PIL.Image.new('RGB', (size, size))
         pixels = img.load()
         
+        # Pre-generate random values for performance
+        noise_values = [[random.randint(-15, 15) for _ in range(size)] for _ in range(size)]
+        shine_patterns = [[random.random() < 0.05 for _ in range(size)] for _ in range(size)]
+        shine_values = [[random.randint(50, 100) for _ in range(size)] for _ in range(size)]
+
         for y in range(size):
             for x in range(size):
                 base_gray = random.randint(180, 220)
-                noise_val = random.randint(-15, 15)
+                noise_val = noise_values[y][x]
                 
                 # Add metallic shine streaks
-                if random.random() < 0.05:
-                    shine = random.randint(50, 100)
+                if shine_patterns[y][x]:
+                    shine = shine_values[y][x]
                     r = min(255, base_gray + shine)
                     g = min(255, base_gray + shine - 10)
                     b = min(255, base_gray + shine - 20)
