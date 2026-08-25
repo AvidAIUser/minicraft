@@ -103,6 +103,10 @@ block_types = {
     10: {'name': 'Lava', 'color': color.rgba(255, 69, 0, 200), 'texture': 'white_cube', 'glow': True, 'hardness': 0.0},
     11: {'name': 'Coal Ore', 'color': color.rgb(64, 64, 64), 'texture': 'white_cube', 'hardness': 2.5},
     12: {'name': 'Iron Ore', 'color': color.rgb(210, 180, 140), 'texture': 'white_cube', 'hardness': 3.0},
+    13: {'name': 'Diamond Ore', 'color': color.rgb(0, 255, 255), 'texture': 'white_cube', 'hardness': 4.0},
+    14: {'name': 'Gold Ore', 'color': color.rgb(255, 215, 0), 'texture': 'white_cube', 'hardness': 3.5},
+    15: {'name': 'Cactus', 'color': color.rgb(0, 128, 0), 'texture': 'white_cube', 'hardness': 0.3},
+    16: {'name': 'Clay', 'color': color.rgb(180, 180, 200), 'texture': 'white_cube', 'hardness': 1.5},
 }
 
 # Tool tiers with mining speed multipliers
@@ -114,12 +118,24 @@ tool_tiers = {
     'diamond': {'speed': 8.0, 'durability': 1562},
 }
 
+# Mob types with properties
+mob_types = {
+    'zombie': {'color': color.rgb(0, 100, 0), 'health': 10, 'speed': 2, 'damage': 1},
+    'skeleton': {'color': color.rgb(200, 200, 200), 'health': 8, 'speed': 2.5, 'damage': 2},
+    'creeper': {'color': color.rgb(0, 150, 0), 'health': 6, 'speed': 1.5, 'damage': 5, 'explosive': True},
+    'pig': {'color': color.rgb(255, 180, 180), 'health': 5, 'speed': 1, 'damage': 0, 'passive': True},
+    'cow': {'color': color.rgb(100, 60, 40), 'health': 8, 'speed': 1.2, 'damage': 0, 'passive': True},
+}
+
 # Crafting recipes: result -> required items
 crafting_recipes = {
     (4, 4): {'wood_planks': 4},  # Wood to planks (simplified)
     ('pickaxe_wood', 1): {4: 3, 2: 2},  # Wood pickaxe: 3 wood, 2 dirt (placeholder)
     ('pickaxe_stone', 1): {3: 3, 4: 2},  # Stone pickaxe: 3 stone, 2 wood
     ('pickaxe_iron', 1): {12: 3, 4: 2},  # Iron pickaxe: 3 iron ore, 2 wood
+    ('pickaxe_diamond', 1): {13: 3, 4: 2},  # Diamond pickaxe: 3 diamond ore, 2 wood
+    ('torch', 4): {11: 1, 4: 1},  # Torch: 1 coal, 1 wood
+    ('brick', 4): {6: 4},  # Brick from clay/sand
 }
 
 current_block = 1  # Currently selected block type
@@ -132,28 +148,53 @@ mob_spawn_timer = 0
 
 class Mob(Entity):
     def __init__(self, position=(0,2,0), mob_type='zombie'):
+        mob_data = mob_types.get(mob_type, mob_types['zombie'])
         super().__init__(
             model='cube',
-            color=color.rgb(0, 255, 0) if mob_type == 'zombie' else color.rgb(255, 255, 255),
-            scale=(0.8, 1.8, 0.8),
+            color=mob_data['color'],
+            scale=(0.8, 1.8, 0.8) if not mob_data.get('passive') else (0.9, 0.9, 1.2),
             position=position,
             collider='box'
         )
         self.mob_type = mob_type
-        self.health = 10
-        self.speed = 2
+        self.health = mob_data['health']
+        self.speed = mob_data['speed']
+        self.damage = mob_data.get('damage', 0)
+        self.passive = mob_data.get('passive', False)
+        self.explosive = mob_data.get('explosive', False)
+        self.explosion_timer = 0
         mobs.append(self)
     
     def update(self):
         # Check if it's night time for spawning
         is_night = day_cycle % 1 > 0.5
         
-        if distance_xz(self.position, player.position) < 20:
+        dist = distance_xz(self.position, player.position)
+        
+        if self.explosive and dist < 3:
+            self.explosion_timer += time.dt
+            if self.explosion_timer > 1.5:
+                # Explode
+                sounds.play_break()
+                player_health -= self.damage
+                Text(text='BOOM!', position=(0, 0.3), scale=2, color=color.orange, duration=1)
+                destroy(self)
+                if self in mobs:
+                    mobs.remove(self)
+                return
+        elif self.explosive:
+            self.explosion_timer = 0
+        
+        if dist < 20 and not self.passive:
             direction = player.position - self.position
             direction.y = 0
             direction = direction.normalized()
             self.position += direction * self.speed * time.dt
             self.look_at(player.position)
+        elif self.passive and dist < 10:
+            # Passive mobs wander randomly
+            if random.random() < 0.02:
+                self.position += Vec3(random.uniform(-1, 1), 0, random.uniform(-1, 1)) * self.speed * time.dt
         
         # Despawn in daylight (optional realism)
         if not is_night and self.mob_type in ['zombie', 'skeleton']:
@@ -168,7 +209,11 @@ class Mob(Entity):
                 mobs.remove(self)
 
 def spawn_mob(position):
-    mob_type = random.choice(['zombie', 'skeleton'])
+    is_night = day_cycle % 1 > 0.5
+    if is_night:
+        mob_type = random.choice(['zombie', 'skeleton', 'creeper'])
+    else:
+        mob_type = random.choice(['pig', 'cow'])
     Mob(position=position, mob_type=mob_type)
 
 # Voxel class for individual blocks
@@ -240,14 +285,26 @@ def generate_terrain():
             # Determine biome based on position
             is_desert = x > 10 or x < -10
             is_snowy = z > 10 or z < -10
+            is_ocean = abs(x) < 3 and abs(z) < 3
             
             # Place appropriate surface block
-            if is_desert:
+            if is_ocean:
+                Voxel(position=(x, height - 2, z), block_type=9)  # Water
+                Voxel(position=(x, height - 3, z), block_type=6)  # Sand below water
+            elif is_desert:
                 Voxel(position=(x, height, z), block_type=6)  # Sand
+                # Random cactus in desert
+                if random.random() < 0.03 and x > -18 and x < 18 and z > -18 and z < 18:
+                    Voxel(position=(x, height + 1, z), block_type=15)  # Cactus
             elif is_snowy:
                 Voxel(position=(x, height, z), block_type=8)  # Snow
             else:
                 Voxel(position=(x, height, z), block_type=1)  # Grass
+                # Clay patches near grass biomes
+                if random.random() < 0.01:
+                    for cx in range(-1, 2):
+                        for cz in range(-1, 2):
+                            Voxel(position=(x + cx, height - 1, z + cz), block_type=16)
             
             # Place dirt below
             for y in range(height - 1, height - 3, -1):
@@ -261,9 +318,13 @@ def generate_terrain():
                 Voxel(position=(x, height - 4, z), block_type=11)
             if random.random() < 0.02:  # Iron ore (rarer)
                 Voxel(position=(x, height - 5, z), block_type=12)
+            if random.random() < 0.01:  # Gold ore (very rare)
+                Voxel(position=(x, height - 6, z), block_type=14)
+            if random.random() < 0.005:  # Diamond ore (extremely rare)
+                Voxel(position=(x, height - 7, z), block_type=13)
             
             # Random trees (only in grass biomes)
-            if random.random() < 0.02 and not is_desert and not is_snowy and x > -15 and x < 15 and z > -15 and z < 15:
+            if random.random() < 0.02 and not is_desert and not is_snowy and not is_ocean and x > -15 and x < 15 and z > -15 and z < 15:
                 create_tree(x, height + 1, z)
     
     print("Terrain generation complete!")
@@ -362,7 +423,7 @@ def input(key):
             hand.color = block_types[current_block]['color']
             sounds.play_select()
     
-    # Tool selection (T for wood, Y for stone, U for iron)
+    # Tool selection (T for wood, Y for stone, U for iron, I for diamond)
     if key == 't':
         current_tool = 'wood'
         tool_durability = tool_tiers['wood']['durability']
@@ -382,6 +443,13 @@ def input(key):
         tool_durability = tool_tiers['iron']['durability']
         tool_info.text = f'Tool: Iron Pickaxe ({tool_durability})'
         tool_info.color = color.rgb(210, 180, 140)
+        sounds.play_select()
+    
+    if key == 'i':
+        current_tool = 'diamond'
+        tool_durability = tool_tiers['diamond']['durability']
+        tool_info.text = f'Tool: Diamond Pickaxe ({tool_durability})'
+        tool_info.color = color.rgb(0, 255, 255)
         sounds.play_select()
     
     # Toggle fly mode
@@ -495,8 +563,9 @@ print("  SPACE - Jump")
 print("  SHIFT/CTRL - Fly up/down (when fly mode is on)")
 print("  LEFT CLICK - Break block / Attack mobs")
 print("  RIGHT CLICK - Place block")
-print("  1-0 - Select block type (1:Grass, 2:Dirt, 3:Stone, 4:Wood, 5:Leaves, 6:Sand, 7:Brick, 8:Snow, 9:Water, 10:Lava, 11:Coal Ore, 12:Iron Ore)")
-print("  T/Y/U - Select tool (Wooden/Stone/Iron Pickaxe)")
+print("  1-9 - Select block type (1:Grass, 2:Dirt, 3:Stone, 4:Wood, 5:Leaves, 6:Sand, 7:Brick, 8:Snow, 9:Water)")
+print("  0/10 - Lava, 11:Coal Ore, 12:Iron Ore, 13:Diamond Ore, 14:Gold Ore, 15:Cactus, 16:Clay")
+print("  T/Y/U/I - Select tool (Wooden/Stone/Iron/Diamond Pickaxe)")
 print("  TAB - Toggle fly mode")
 print("  ESC - Release mouse")
 print("Features: Health, Hunger, XP/Levels, Mob spawning at night, Day/Night cycle, Tool durability, Block hardness")
