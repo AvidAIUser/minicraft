@@ -89,21 +89,42 @@ ground = Entity(
     texture_scale=(100, 100)
 )
 
-# Block types with colors/textures
+# Block types with colors/textures and properties
 block_types = {
-    1: {'name': 'Grass', 'color': color.rgb(0, 155, 0), 'texture': 'grass'},
-    2: {'name': 'Dirt', 'color': color.rgb(139, 69, 19), 'texture': 'dirt'},
-    3: {'name': 'Stone', 'color': color.rgb(128, 128, 128), 'texture': 'white_cube'},
-    4: {'name': 'Wood', 'color': color.rgb(101, 67, 33), 'texture': 'white_cube'},
-    5: {'name': 'Leaves', 'color': color.rgb(34, 139, 34), 'texture': 'white_cube'},
-    6: {'name': 'Sand', 'color': color.rgb(237, 220, 163), 'texture': 'white_cube'},
-    7: {'name': 'Brick', 'color': color.rgb(178, 34, 34), 'texture': 'white_cube'},
-    8: {'name': 'Snow', 'color': color.rgb(255, 250, 250), 'texture': 'white_cube'},
-    9: {'name': 'Water', 'color': color.rgba(0, 0, 255, 180), 'texture': 'white_cube', 'transparent': True},
-    10: {'name': 'Lava', 'color': color.rgba(255, 69, 0, 200), 'texture': 'white_cube', 'glow': True},
+    1: {'name': 'Grass', 'color': color.rgb(0, 155, 0), 'texture': 'grass', 'hardness': 1.0},
+    2: {'name': 'Dirt', 'color': color.rgb(139, 69, 19), 'texture': 'dirt', 'hardness': 0.8},
+    3: {'name': 'Stone', 'color': color.rgb(128, 128, 128), 'texture': 'white_cube', 'hardness': 2.0},
+    4: {'name': 'Wood', 'color': color.rgb(101, 67, 33), 'texture': 'white_cube', 'hardness': 1.2},
+    5: {'name': 'Leaves', 'color': color.rgb(34, 139, 34), 'texture': 'white_cube', 'hardness': 0.5},
+    6: {'name': 'Sand', 'color': color.rgb(237, 220, 163), 'texture': 'white_cube', 'hardness': 0.6},
+    7: {'name': 'Brick', 'color': color.rgb(178, 34, 34), 'texture': 'white_cube', 'hardness': 2.5},
+    8: {'name': 'Snow', 'color': color.rgb(255, 250, 250), 'texture': 'white_cube', 'hardness': 0.4},
+    9: {'name': 'Water', 'color': color.rgba(0, 0, 255, 180), 'texture': 'white_cube', 'transparent': True, 'hardness': 0.0},
+    10: {'name': 'Lava', 'color': color.rgba(255, 69, 0, 200), 'texture': 'white_cube', 'glow': True, 'hardness': 0.0},
+    11: {'name': 'Coal Ore', 'color': color.rgb(64, 64, 64), 'texture': 'white_cube', 'hardness': 2.5},
+    12: {'name': 'Iron Ore', 'color': color.rgb(210, 180, 140), 'texture': 'white_cube', 'hardness': 3.0},
+}
+
+# Tool tiers with mining speed multipliers
+tool_tiers = {
+    'none': {'speed': 1.0, 'durability': 0},
+    'wood': {'speed': 2.0, 'durability': 60},
+    'stone': {'speed': 4.0, 'durability': 132},
+    'iron': {'speed': 6.0, 'durability': 251},
+    'diamond': {'speed': 8.0, 'durability': 1562},
+}
+
+# Crafting recipes: result -> required items
+crafting_recipes = {
+    (4, 4): {'wood_planks': 4},  # Wood to planks (simplified)
+    ('pickaxe_wood', 1): {4: 3, 2: 2},  # Wood pickaxe: 3 wood, 2 dirt (placeholder)
+    ('pickaxe_stone', 1): {3: 3, 4: 2},  # Stone pickaxe: 3 stone, 2 wood
+    ('pickaxe_iron', 1): {12: 3, 4: 2},  # Iron pickaxe: 3 iron ore, 2 wood
 }
 
 current_block = 1  # Currently selected block type
+current_tool = 'none'  # Current tool tier
+tool_durability = 0  # Current tool durability
 
 # Simple mobs list
 mobs = []
@@ -124,12 +145,22 @@ class Mob(Entity):
         mobs.append(self)
     
     def update(self):
+        # Check if it's night time for spawning
+        is_night = day_cycle % 1 > 0.5
+        
         if distance_xz(self.position, player.position) < 20:
             direction = player.position - self.position
             direction.y = 0
             direction = direction.normalized()
             self.position += direction * self.speed * time.dt
             self.look_at(player.position)
+        
+        # Despawn in daylight (optional realism)
+        if not is_night and self.mob_type in ['zombie', 'skeleton']:
+            if distance_xz(self.position, player.position) > 30:
+                destroy(self)
+                if self in mobs:
+                    mobs.remove(self)
         
         if self.y < -10:
             destroy(self)
@@ -154,12 +185,34 @@ class Voxel(Button):
             collider='box'
         )
         self.block_type = block_type
+        self.break_progress = 0
     
     def input(self, key):
+        global tool_durability, current_tool
         if self.hovered:
             if key == 'left mouse down':
-                sounds.play_break()
-                destroy(self)
+                hardness = block_types[self.block_type].get('hardness', 1.0)
+                tool_speed = tool_tiers[current_tool]['speed']
+                self.break_progress += tool_speed * 0.2
+                
+                # Check if block is broken
+                if self.break_progress >= hardness:
+                    sounds.play_break()
+                    
+                    # Decrease tool durability if not bare hands
+                    if current_tool != 'none' and tool_durability > 0:
+                        tool_durability -= 1
+                        if tool_durability <= 0:
+                            current_tool = 'none'
+                            tool_durability = 0
+                            Text(text='Tool Broken!', position=(0, 0.2), scale=1.5, color=color.red, duration=1.5)
+                    
+                    destroy(self)
+                else:
+                    # Show breaking particles/sound based on progress
+                    if self.break_progress > hardness * 0.3 and not hasattr(self, '_sound_played'):
+                        sounds.play_break()
+                        self._sound_played = True
             
             if key == 'right mouse down':
                 # Get the normal to determine where to place the new block
@@ -176,16 +229,25 @@ class Voxel(Button):
             global player_hunger
             player_hunger -= 0.5
 
-# Generate initial terrain
+# Generate initial terrain with ores and varied biomes
 def generate_terrain():
     print("Generating terrain...")
     for x in range(-20, 20):
         for z in range(-20, 20):
-            # Simple height variation
+            # Simple height variation with biome-like features
             height = int(math.sin(x / 5) * 2 + math.cos(z / 5) * 2)
             
-            # Place grass on top
-            Voxel(position=(x, height, z), block_type=1)
+            # Determine biome based on position
+            is_desert = x > 10 or x < -10
+            is_snowy = z > 10 or z < -10
+            
+            # Place appropriate surface block
+            if is_desert:
+                Voxel(position=(x, height, z), block_type=6)  # Sand
+            elif is_snowy:
+                Voxel(position=(x, height, z), block_type=8)  # Snow
+            else:
+                Voxel(position=(x, height, z), block_type=1)  # Grass
             
             # Place dirt below
             for y in range(height - 1, height - 3, -1):
@@ -194,8 +256,14 @@ def generate_terrain():
             # Place stone at bottom
             Voxel(position=(x, height - 3, z), block_type=3)
             
-            # Random trees
-            if random.random() < 0.02 and x > -15 and x < 15 and z > -15 and z < 15:
+            # Generate ores in stone layer (random distribution)
+            if random.random() < 0.03:  # Coal ore
+                Voxel(position=(x, height - 4, z), block_type=11)
+            if random.random() < 0.02:  # Iron ore (rarer)
+                Voxel(position=(x, height - 5, z), block_type=12)
+            
+            # Random trees (only in grass biomes)
+            if random.random() < 0.02 and not is_desert and not is_snowy and x > -15 and x < 15 and z > -15 and z < 15:
                 create_tree(x, height + 1, z)
     
     print("Terrain generation complete!")
@@ -245,6 +313,14 @@ block_info = Text(
     color=color.white
 )
 
+# Tool info UI
+tool_info = Text(
+    text=f'Tool: None',
+    position=(-0.85, 0.40),
+    scale=1.2,
+    color=color.white
+)
+
 # Health and Hunger bars
 health_bar = Entity(parent=camera.ui, model='quad', texture='white_cube', scale=(0.3, 0.03), position=(-0.7, -0.4), color=color.red)
 hunger_bar = Entity(parent=camera.ui, model='quad', texture='white_cube', scale=(0.3, 0.03), position=(-0.7, -0.45), color=color.orange)
@@ -272,7 +348,7 @@ crosshair = Entity(parent=camera.ui, model='quad', texture='circle', scale=(0.01
 fly_mode = False
 
 def input(key):
-    global current_block, fly_mode, player_xp, player_level
+    global current_block, fly_mode, player_xp, player_level, current_tool, tool_durability
     
     # Block selection (1-10)
     if key in ('1', '2', '3', '4', '5', '6', '7', '8', '9', '0'):
@@ -285,6 +361,28 @@ def input(key):
             # Update hand color
             hand.color = block_types[current_block]['color']
             sounds.play_select()
+    
+    # Tool selection (T for wood, Y for stone, U for iron)
+    if key == 't':
+        current_tool = 'wood'
+        tool_durability = tool_tiers['wood']['durability']
+        tool_info.text = f'Tool: Wooden Pickaxe ({tool_durability})'
+        tool_info.color = color.rgb(139, 69, 19)
+        sounds.play_select()
+    
+    if key == 'y':
+        current_tool = 'stone'
+        tool_durability = tool_tiers['stone']['durability']
+        tool_info.text = f'Tool: Stone Pickaxe ({tool_durability})'
+        tool_info.color = color.gray
+        sounds.play_select()
+    
+    if key == 'u':
+        current_tool = 'iron'
+        tool_durability = tool_tiers['iron']['durability']
+        tool_info.text = f'Tool: Iron Pickaxe ({tool_durability})'
+        tool_info.color = color.rgb(210, 180, 140)
+        sounds.play_select()
     
     # Toggle fly mode
     if key == 'tab':
@@ -355,7 +453,6 @@ def update():
         player.z = 0
     
     # Hunger depletion over time
-    global player_health, player_hunger, player_xp, player_level
     if time.dt > 0:
         player_hunger -= time.dt * 0.05
         if player_hunger <= 0:
@@ -367,6 +464,10 @@ def update():
     hunger_bar.scale_x = max(0, player_hunger / 10) * 0.3
     xp_bar.scale_x = max(0, player_xp / (10 * (player_level + 1))) * 0.3
     
+    # Update tool durability display
+    if current_tool != 'none':
+        tool_info.text = f'Tool: {current_tool.capitalize()} Pickaxe ({tool_durability})'
+    
     # Game over check
     if player_health <= 0:
         Text(text='GAME OVER - Press R to Restart', position=(0, 0), scale=2, color=color.red, origin=(0, 0))
@@ -375,6 +476,9 @@ def update():
             player_hunger = 10
             player_xp = 0
             player_level = 0
+            current_tool = 'none'
+            tool_durability = 0
+            tool_info.text = 'Tool: None'
             player.position = (0, 5, 0)
             for mob in mobs[:]:
                 destroy(mob)
@@ -391,10 +495,11 @@ print("  SPACE - Jump")
 print("  SHIFT/CTRL - Fly up/down (when fly mode is on)")
 print("  LEFT CLICK - Break block / Attack mobs")
 print("  RIGHT CLICK - Place block")
-print("  1-0 - Select block type (1:Grass, 2:Dirt, 3:Stone, 4:Wood, 5:Leaves, 6:Sand, 7:Brick, 8:Snow, 9:Water, 10:Lava)")
+print("  1-0 - Select block type (1:Grass, 2:Dirt, 3:Stone, 4:Wood, 5:Leaves, 6:Sand, 7:Brick, 8:Snow, 9:Water, 10:Lava, 11:Coal Ore, 12:Iron Ore)")
+print("  T/Y/U - Select tool (Wooden/Stone/Iron Pickaxe)")
 print("  TAB - Toggle fly mode")
 print("  ESC - Release mouse")
-print("Features: Health, Hunger, XP/Levels, Mob spawning at night, Day/Night cycle")
+print("Features: Health, Hunger, XP/Levels, Mob spawning at night, Day/Night cycle, Tool durability, Block hardness")
 print("======================\n")
 
 app.run()
