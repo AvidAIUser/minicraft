@@ -657,6 +657,7 @@ class Mob(Entity):
             if self.explosion_timer > 1.5:
                 # Explode
                 sounds.play_break()
+                global player_health
                 player_health -= self.damage
                 Text(text='BOOM!', position=(0, 0.3), scale=2, color=color.orange, duration=1)
                 destroy(self)
@@ -1116,7 +1117,7 @@ def input(key):
                         Text(text='Level Up!', position=(0, 0.3), scale=2, color=color.gold, duration=1.5)
 
 def update():
-    global player, day_cycle, mob_spawn_timer, last_footstep_time
+    global player, day_cycle, mob_spawn_timer, last_footstep_time, player_health, player_hunger
     
     # Hand animation
     update_hand()
