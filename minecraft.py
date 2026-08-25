@@ -32,6 +32,9 @@ import math
 import wave
 import struct
 import io
+import traceback
+import sys
+from datetime import datetime
 from perlin_noise import PerlinNoise
 from collections import deque
 
@@ -1297,5 +1300,27 @@ print("  * Ambient water/lava sounds when nearby")
 print("  * New block types: Glass (transparent), Iron Block (metallic)")
 print("  * Anti-aliasing enabled for smoother visuals")
 print("======================\n")
+
+# Crash logging system - logs errors to file if program crashes
+def setup_crash_logger():
+    log_file = "crash_log.txt"
+    def exception_handler(exc_type, exc_value, exc_traceback):
+        if issubclass(exc_type, KeyboardInterrupt):
+            sys.__excepthook__(exc_type, exc_value, exc_traceback)
+            return
+        with open(log_file, "a") as f:
+            f.write(f"\n{'='*60}\n")
+            f.write(f"Crash occurred at: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n")
+            f.write(f"Exception Type: {exc_type.__name__}\n")
+            f.write(f"Exception Message: {exc_value}\n")
+            f.write("Traceback:\n")
+            traceback.print_exception(exc_type, exc_value, exc_traceback, file=f)
+            f.write(f"{'='*60}\n")
+        print(f"\n*** CRASH LOGGED TO {log_file} ***")
+        print(f"Error: {exc_type.__name__}: {exc_value}")
+        print("\nThe crash has been logged to 'crash_log.txt' for review.")
+    sys.excepthook = exception_handler
+
+setup_crash_logger()
 
 app.run()
