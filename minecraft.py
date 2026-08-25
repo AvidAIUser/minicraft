@@ -99,9 +99,46 @@ block_types = {
     6: {'name': 'Sand', 'color': color.rgb(237, 220, 163), 'texture': 'white_cube'},
     7: {'name': 'Brick', 'color': color.rgb(178, 34, 34), 'texture': 'white_cube'},
     8: {'name': 'Snow', 'color': color.rgb(255, 250, 250), 'texture': 'white_cube'},
+    9: {'name': 'Water', 'color': color.rgba(0, 0, 255, 180), 'texture': 'white_cube', 'transparent': True},
+    10: {'name': 'Lava', 'color': color.rgba(255, 69, 0, 200), 'texture': 'white_cube', 'glow': True},
 }
 
 current_block = 1  # Currently selected block type
+
+# Simple mobs list
+mobs = []
+mob_spawn_timer = 0
+
+class Mob(Entity):
+    def __init__(self, position=(0,2,0), mob_type='zombie'):
+        super().__init__(
+            model='cube',
+            color=color.rgb(0, 255, 0) if mob_type == 'zombie' else color.rgb(255, 255, 255),
+            scale=(0.8, 1.8, 0.8),
+            position=position,
+            collider='box'
+        )
+        self.mob_type = mob_type
+        self.health = 10
+        self.speed = 2
+        mobs.append(self)
+    
+    def update(self):
+        if distance_xz(self.position, player.position) < 20:
+            direction = player.position - self.position
+            direction.y = 0
+            direction = direction.normalized()
+            self.position += direction * self.speed * time.dt
+            self.look_at(player.position)
+        
+        if self.y < -10:
+            destroy(self)
+            if self in mobs:
+                mobs.remove(self)
+
+def spawn_mob(position):
+    mob_type = random.choice(['zombie', 'skeleton'])
+    Mob(position=position, mob_type=mob_type)
 
 # Voxel class for individual blocks
 class Voxel(Button):
@@ -214,30 +251,40 @@ hunger_bar = Entity(parent=camera.ui, model='quad', texture='white_cube', scale=
 health_text = Text(text='Health', position=(-0.85, -0.38), scale=0.7, color=color.white)
 hunger_text = Text(text='Hunger', position=(-0.85, -0.43), scale=0.7, color=color.white)
 
+# Experience bar
+xp_bar = Entity(parent=camera.ui, model='quad', texture='white_cube', scale=(0.3, 0.02), position=(-0.7, -0.5), color=color.cyan)
+xp_text = Text(text='Experience', position=(-0.85, -0.48), scale=0.7, color=color.white)
+
 player_health = 10
 player_hunger = 10
+player_xp = 0
+player_level = 0
 
 controls_info = Text(
-    text='WASD: Move | Space: Jump | LMB: Break | RMB: Place | 1-8: Blocks',
+    text='WASD: Move | Space: Jump | LMB: Break | RMB: Place | 1-10: Blocks',
     position=(-0.85, -0.52),
     scale=0.7,
     color=color.gray
 )
 
+crosshair = Entity(parent=camera.ui, model='quad', texture='circle', scale=(0.01, 0.01), color=color.white)
+
 fly_mode = False
 
 def input(key):
-    global current_block, fly_mode
+    global current_block, fly_mode, player_xp, player_level
     
-    # Block selection (1-8)
-    if key in ('1', '2', '3', '4', '5', '6', '7', '8'):
-        current_block = int(key)
-        block_info.text = f'Block: {block_types[current_block]["name"]}'
-        block_info.color = block_types[current_block]['color']
-        
-        # Update hand color
-        hand.color = block_types[current_block]['color']
-        sounds.play_select()
+    # Block selection (1-10)
+    if key in ('1', '2', '3', '4', '5', '6', '7', '8', '9', '0'):
+        block_num = 10 if key == '0' else int(key)
+        if block_num <= len(block_types):
+            current_block = block_num
+            block_info.text = f'Block: {block_types[current_block]["name"]}'
+            block_info.color = block_types[current_block]['color']
+            
+            # Update hand color
+            hand.color = block_types[current_block]['color']
+            sounds.play_select()
     
     # Toggle fly mode
     if key == 'tab':
@@ -251,9 +298,25 @@ def input(key):
             mouse.locked = False
         else:
             mouse.locked = True
+    
+    # Attack mobs with left click when not hovering a block
+    if key == 'left mouse down' and not mouse.hovered_entity:
+        for mob in mobs[:]:
+            if distance(mob.position, player.position) < 4:
+                mob.health -= 3
+                sounds.play_break()
+                if mob.health <= 0:
+                    destroy(mob)
+                    mobs.remove(mob)
+                    player_xp += 2
+                    if player_xp >= 10 * (player_level + 1):
+                        player_xp = 0
+                        player_level += 1
+                        player_health = min(10, player_health + 2)
+                        Text(text='Level Up!', position=(0, 0.3), scale=2, color=color.gold, duration=1.5)
 
 def update():
-    global player, day_cycle
+    global player, day_cycle, mob_spawn_timer
     
     # Hand animation
     update_hand()
@@ -261,6 +324,22 @@ def update():
     # Day/night cycle
     day_cycle += time.dt * 0.1
     sky.rotation = (day_cycle * 360, 0, 0)
+    
+    # Spawn mobs at night
+    mob_spawn_timer += time.dt
+    if mob_spawn_timer > 5 and day_cycle % 1 > 0.5:  # Night time
+        spawn_x = random.randint(-20, 20)
+        spawn_z = random.randint(-20, 20)
+        if distance_xz((spawn_x, spawn_z), (player.x, player.z)) > 10:
+            spawn_mob(position=(spawn_x, 5, spawn_z))
+        mob_spawn_timer = 0
+    
+    # Update mobs
+    for mob in mobs[:]:
+        if mob.enabled:
+            mob.update()
+        if distance(mob.position, player.position) < 1.5:
+            player_health -= time.dt * 0.5
     
     # Flying controls
     if fly_mode:
@@ -276,7 +355,7 @@ def update():
         player.z = 0
     
     # Hunger depletion over time
-    global player_health, player_hunger
+    global player_health, player_hunger, player_xp, player_level
     if time.dt > 0:
         player_hunger -= time.dt * 0.05
         if player_hunger <= 0:
@@ -286,6 +365,7 @@ def update():
     # Update health and hunger bars
     health_bar.scale_x = max(0, player_health / 10) * 0.3
     hunger_bar.scale_x = max(0, player_hunger / 10) * 0.3
+    xp_bar.scale_x = max(0, player_xp / (10 * (player_level + 1))) * 0.3
     
     # Game over check
     if player_health <= 0:
@@ -293,7 +373,12 @@ def update():
         if held_keys['r']:
             player_health = 10
             player_hunger = 10
+            player_xp = 0
+            player_level = 0
             player.position = (0, 5, 0)
+            for mob in mobs[:]:
+                destroy(mob)
+            mobs.clear()
 
 # Generate the world
 generate_terrain()
@@ -304,11 +389,12 @@ print("Controls:")
 print("  WASD - Move")
 print("  SPACE - Jump")
 print("  SHIFT/CTRL - Fly up/down (when fly mode is on)")
-print("  LEFT CLICK - Break block")
+print("  LEFT CLICK - Break block / Attack mobs")
 print("  RIGHT CLICK - Place block")
-print("  1-8 - Select block type (1:Grass, 2:Dirt, 3:Stone, 4:Wood, 5:Leaves, 6:Sand, 7:Brick, 8:Snow)")
+print("  1-0 - Select block type (1:Grass, 2:Dirt, 3:Stone, 4:Wood, 5:Leaves, 6:Sand, 7:Brick, 8:Snow, 9:Water, 10:Lava)")
 print("  TAB - Toggle fly mode")
 print("  ESC - Release mouse")
+print("Features: Health, Hunger, XP/Levels, Mob spawning at night, Day/Night cycle")
 print("======================\n")
 
 app.run()
