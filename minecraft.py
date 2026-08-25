@@ -9,7 +9,7 @@ Controls:
 - Ctrl: Fly down (in creative mode)
 - Left Click: Break block
 - Right Click: Place block
-- 1-5: Select block type
+- 1-8: Select block type
 - Tab: Toggle fly mode
 - Esc: Release mouse / Pause
 """
@@ -17,18 +17,68 @@ Controls:
 from ursina import *
 from ursina.prefabs.first_person_controller import FirstPersonController
 import random
+import math
+import wave
+import struct
+import io
+
+# Sound Manager using synthesized waves to avoid external dependencies
+class SoundManager:
+    def __init__(self):
+        self.enabled = True
+        try:
+            self.test_sound = self.generate_sound(440, 0.05)
+        except Exception:
+            self.enabled = False
+
+    def generate_sound(self, frequency, duration, volume=0.3):
+        sample_rate = 22050
+        n_samples = int(sample_rate * duration)
+        buf = bytearray()
+        for i in range(n_samples):
+            t = i / sample_rate
+            val = int(volume * 32767 * (1 if math.sin(2 * math.pi * frequency * t) > 0 else -1))
+            buf.extend(struct.pack('<h', val))
+        wav_io = io.BytesIO()
+        with wave.open(wav_io, 'wb') as wav_file:
+            wav_file.setnchannels(1)
+            wav_file.setsampwidth(2)
+            wav_file.setframerate(sample_rate)
+            wav_file.writeframes(buf)
+        wav_io.seek(0)
+        return Audio(wav_io, autoplay=False, loop=False)
+
+    def play_break(self):
+        if not self.enabled: return
+        sound = self.generate_sound(150, 0.1, 0.5)
+        sound.pitch = random.uniform(0.8, 1.2)
+        sound.play()
+
+    def play_place(self):
+        if not self.enabled: return
+        sound = self.generate_sound(400, 0.05, 0.4)
+        sound.pitch = random.uniform(1.0, 1.4)
+        sound.play()
+
+    def play_select(self):
+        if not self.enabled: return
+        sound = self.generate_sound(600, 0.03, 0.3)
+        sound.play()
 
 # Initialize the app
 app = Ursina()
+sounds = SoundManager()
 
 # Window settings
 window.title = 'Minecraft Clone'
 window.borderless = False
 window.fullscreen = False
 window.exit_button.visible = True
+window.fps_counter.enabled = True
 
-# Sky
-Sky(texture='sky_sunset')
+# Sky with day/night cycle
+sky = Sky(texture='sky_sunset')
+day_cycle = 0
 
 # Ground plane (base layer)
 ground = Entity(
@@ -46,6 +96,9 @@ block_types = {
     3: {'name': 'Stone', 'color': color.rgb(128, 128, 128), 'texture': 'white_cube'},
     4: {'name': 'Wood', 'color': color.rgb(101, 67, 33), 'texture': 'white_cube'},
     5: {'name': 'Leaves', 'color': color.rgb(34, 139, 34), 'texture': 'white_cube'},
+    6: {'name': 'Sand', 'color': color.rgb(237, 220, 163), 'texture': 'white_cube'},
+    7: {'name': 'Brick', 'color': color.rgb(178, 34, 34), 'texture': 'white_cube'},
+    8: {'name': 'Snow', 'color': color.rgb(255, 250, 250), 'texture': 'white_cube'},
 }
 
 current_block = 1  # Currently selected block type
@@ -68,8 +121,8 @@ class Voxel(Button):
     def input(self, key):
         if self.hovered:
             if key == 'left mouse down':
+                sounds.play_break()
                 destroy(self)
-                Audio('ursina/assets/sounds/hit.wav', pitch=random.uniform(0.8, 1.2))
             
             if key == 'right mouse down':
                 # Get the normal to determine where to place the new block
@@ -79,7 +132,7 @@ class Voxel(Button):
                 # Don't place block inside player
                 if distance(new_pos, player.position) > 1.5:
                     Voxel(position=new_pos, block_type=current_block)
-                    Audio('ursina/assets/sounds/step.wav', pitch=random.uniform(0.8, 1.2))
+                    sounds.play_place()
 
 # Generate initial terrain
 def generate_terrain():
@@ -151,7 +204,7 @@ block_info = Text(
 )
 
 controls_info = Text(
-    text='WASD: Move | Space: Jump | LMB: Break | RMB: Place | 1-5: Blocks',
+    text='WASD: Move | Space: Jump | LMB: Break | RMB: Place | 1-8: Blocks',
     position=(-0.85, -0.45),
     scale=0.7,
     color=color.gray
@@ -162,14 +215,15 @@ fly_mode = False
 def input(key):
     global current_block, fly_mode
     
-    # Block selection
-    if key in ('1', '2', '3', '4', '5'):
+    # Block selection (1-8)
+    if key in ('1', '2', '3', '4', '5', '6', '7', '8'):
         current_block = int(key)
         block_info.text = f'Block: {block_types[current_block]["name"]}'
         block_info.color = block_types[current_block]['color']
         
         # Update hand color
         hand.color = block_types[current_block]['color']
+        sounds.play_select()
     
     # Toggle fly mode
     if key == 'tab':
@@ -185,10 +239,14 @@ def input(key):
             mouse.locked = True
 
 def update():
-    global player
+    global player, day_cycle
     
     # Hand animation
     update_hand()
+    
+    # Day/night cycle
+    day_cycle += time.dt * 0.1
+    sky.rotation = (day_cycle * 360, 0, 0)
     
     # Flying controls
     if fly_mode:
@@ -214,7 +272,7 @@ print("  SPACE - Jump")
 print("  SHIFT/CTRL - Fly up/down (when fly mode is on)")
 print("  LEFT CLICK - Break block")
 print("  RIGHT CLICK - Place block")
-print("  1-5 - Select block type")
+print("  1-8 - Select block type (1:Grass, 2:Dirt, 3:Stone, 4:Wood, 5:Leaves, 6:Sand, 7:Brick, 8:Snow)")
 print("  TAB - Toggle fly mode")
 print("  ESC - Release mouse")
 print("======================\n")
