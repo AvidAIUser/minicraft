@@ -133,6 +133,11 @@ class Voxel(Button):
                 if distance(new_pos, player.position) > 1.5:
                     Voxel(position=new_pos, block_type=current_block)
                     sounds.play_place()
+        
+        # Jumping depletes hunger
+        if key == 'space' and self.hovered == False:
+            global player_hunger
+            player_hunger -= 0.5
 
 # Generate initial terrain
 def generate_terrain():
@@ -203,9 +208,18 @@ block_info = Text(
     color=color.white
 )
 
+# Health and Hunger bars
+health_bar = Entity(parent=camera.ui, model='quad', texture='white_cube', scale=(0.3, 0.03), position=(-0.7, -0.4), color=color.red)
+hunger_bar = Entity(parent=camera.ui, model='quad', texture='white_cube', scale=(0.3, 0.03), position=(-0.7, -0.45), color=color.orange)
+health_text = Text(text='Health', position=(-0.85, -0.38), scale=0.7, color=color.white)
+hunger_text = Text(text='Hunger', position=(-0.85, -0.43), scale=0.7, color=color.white)
+
+player_health = 10
+player_hunger = 10
+
 controls_info = Text(
     text='WASD: Move | Space: Jump | LMB: Break | RMB: Place | 1-8: Blocks',
-    position=(-0.85, -0.45),
+    position=(-0.85, -0.52),
     scale=0.7,
     color=color.gray
 )
@@ -260,6 +274,26 @@ def update():
         player.y = 10
         player.x = 0
         player.z = 0
+    
+    # Hunger depletion over time
+    global player_health, player_hunger
+    if time.dt > 0:
+        player_hunger -= time.dt * 0.05
+        if player_hunger <= 0:
+            player_hunger = 0
+            player_health -= time.dt * 0.1
+    
+    # Update health and hunger bars
+    health_bar.scale_x = max(0, player_health / 10) * 0.3
+    hunger_bar.scale_x = max(0, player_hunger / 10) * 0.3
+    
+    # Game over check
+    if player_health <= 0:
+        Text(text='GAME OVER - Press R to Restart', position=(0, 0), scale=2, color=color.red, origin=(0, 0))
+        if held_keys['r']:
+            player_health = 10
+            player_hunger = 10
+            player.position = (0, 5, 0)
 
 # Generate the world
 generate_terrain()
