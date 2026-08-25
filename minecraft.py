@@ -35,10 +35,14 @@ import io
 from perlin_noise import PerlinNoise
 from collections import deque
 
-# Enable shadows and better rendering
-window.settings.shadows = True
-window.settings.gamma = 2.2
-window.settings.fullscreen_samples = 4  # Anti-aliasing
+# Enable shadows and better rendering (compatible with different Ursina versions)
+try:
+    window.settings.shadows = True
+    window.settings.gamma = 2.2
+    window.settings.fullscreen_samples = 4
+except AttributeError:
+    # Fallback for newer Ursina versions where settings API changed
+    pass
 
 # Sound Manager using synthesized waves to avoid external dependencies
 class SoundManager:
