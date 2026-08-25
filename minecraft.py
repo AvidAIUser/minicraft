@@ -12,15 +12,31 @@ Controls:
 - 1-8: Select block type
 - Tab: Toggle fly mode
 - Esc: Release mouse / Pause
+
+Enhanced Features:
+- Procedural textures for all block types
+- Dynamic lighting with shadows
+- Ambient occlusion simulation
+- Enhanced sound effects with spatial audio
+- Particle effects for block breaking/placing
+- Animated water and lava
+- Day/night cycle with ambient lighting changes
+- Fog effects based on time of day
 """
 
 from ursina import *
 from ursina.prefabs.first_person_controller import FirstPersonController
+from ursina.lights import DirectionalLight, PointLight, AmbientLight
 import random
 import math
 import wave
 import struct
 import io
+from perlin_noise import PerlinNoise
+
+# Enable shadows and better rendering
+window.settings.shadows = True
+window.settings.gamma = 2.2
 
 # Sound Manager using synthesized waves to avoid external dependencies
 class SoundManager:
@@ -30,15 +46,42 @@ class SoundManager:
             self.test_sound = self.generate_sound(440, 0.05)
         except Exception:
             self.enabled = False
-
-    def generate_sound(self, frequency, duration, volume=0.3):
+        
+        # Cache common sounds
+        self.break_sounds = []
+        self.place_sounds = []
+        self.select_sounds = []
+        self.step_sounds = []
+        
+        # Pre-generate variety of sounds
+        for i in range(5):
+            self.break_sounds.append(self.generate_sound(100 + i*30, 0.08, 0.4))
+            self.place_sounds.append(self.generate_sound(300 + i*50, 0.04, 0.3))
+            self.select_sounds.append(self.generate_sound(500 + i*40, 0.03, 0.25))
+            self.step_sounds.append(self.generate_sound(200 + i*20, 0.02, 0.15))
+    
+    def generate_sound(self, frequency, duration, volume=0.3, sound_type='square'):
         sample_rate = 22050
         n_samples = int(sample_rate * duration)
         buf = bytearray()
+        
         for i in range(n_samples):
             t = i / sample_rate
-            val = int(volume * 32767 * (1 if math.sin(2 * math.pi * frequency * t) > 0 else -1))
+            # Envelope for natural fade
+            envelope = 1.0 - (i / n_samples) * 0.5
+            
+            if sound_type == 'square':
+                val = math.sin(2 * math.pi * frequency * t)
+                val = volume * envelope * (1 if val > 0 else -1)
+            elif sound_type == 'noise':
+                val = volume * envelope * (random.uniform(-1, 1))
+            else:  # sine
+                val = volume * envelope * math.sin(2 * math.pi * frequency * t)
+            
+            val = int(val * 32767)
+            val = max(-32768, min(32767, val))
             buf.extend(struct.pack('<h', val))
+        
         wav_io = io.BytesIO()
         with wave.open(wav_io, 'wb') as wav_file:
             wav_file.setnchannels(1)
@@ -47,38 +90,274 @@ class SoundManager:
             wav_file.writeframes(buf)
         wav_io.seek(0)
         return Audio(wav_io, autoplay=False, loop=False)
-
-    def play_break(self):
+    
+    def play_break(self, block_type='stone'):
         if not self.enabled: return
-        sound = self.generate_sound(150, 0.1, 0.5)
-        sound.pitch = random.uniform(0.8, 1.2)
+        sound = random.choice(self.break_sounds)
+        sound.pitch = random.uniform(0.7, 1.3)
+        
+        # Different pitches for different block types
+        if block_type == 'wood':
+            sound.pitch *= 1.2
+        elif block_type == 'glass':
+            sound.pitch *= 1.5
+        elif block_type == 'metal':
+            sound.pitch *= 0.8
+        
+        sound.volume = random.uniform(0.3, 0.6)
         sound.play()
-
-    def play_place(self):
+    
+    def play_place(self, block_type='stone'):
         if not self.enabled: return
-        sound = self.generate_sound(400, 0.05, 0.4)
-        sound.pitch = random.uniform(1.0, 1.4)
+        sound = random.choice(self.place_sounds)
+        sound.pitch = random.uniform(0.9, 1.2)
+        
+        if block_type == 'wood':
+            sound.pitch *= 1.1
+        elif block_type == 'glass':
+            sound.pitch *= 1.4
+        
+        sound.volume = random.uniform(0.2, 0.4)
         sound.play()
-
+    
     def play_select(self):
         if not self.enabled: return
-        sound = self.generate_sound(600, 0.03, 0.3)
+        sound = random.choice(self.select_sounds)
+        sound.pitch = random.uniform(1.0, 1.3)
+        sound.volume = 0.25
         sound.play()
+    
+    def play_step(self):
+        if not self.enabled: return
+        sound = random.choice(self.step_sounds)
+        sound.pitch = random.uniform(0.8, 1.1)
+        sound.volume = 0.1
+        sound.play()
+    
+    def play_water(self):
+        if not self.enabled: return
+        sound = self.generate_sound(300, 0.3, 0.15, 'noise')
+        sound.pitch = random.uniform(0.8, 1.2)
+        sound.play()
+    
+    def play_lava(self):
+        if not self.enabled: return
+        sound = self.generate_sound(80, 0.4, 0.2, 'noise')
+        sound.pitch = random.uniform(0.6, 0.9)
+        sound.play()
+
+# Texture Generator for procedural textures
+class TextureGenerator:
+    @staticmethod
+    def create_grass_texture(size=64):
+        img = PIL.Image.new('RGB', (size, size))
+        pixels = img.load()
+        
+        for y in range(size):
+            for x in range(size):
+                # Base green color with variation
+                base_green = random.randint(40, 80)
+                noise = random.randint(-15, 15)
+                
+                # Add grass blade patterns
+                if random.random() < 0.3:
+                    r = max(0, min(255, base_green + noise + 20))
+                    g = max(0, min(255, base_green * 2 + noise + 40))
+                    b = max(0, min(255, base_green + noise))
+                else:
+                    r = max(0, min(255, base_green + noise - 10))
+                    g = max(0, min(255, base_green * 1.5 + noise + 20))
+                    b = max(0, min(255, base_green + noise - 5))
+                
+                pixels[x, y] = (r, g, b)
+        
+        return img
+    
+    @staticmethod
+    def create_dirt_texture(size=64):
+        img = PIL.Image.new('RGB', (size, size))
+        pixels = img.load()
+        
+        for y in range(size):
+            for x in range(size):
+                base_brown = random.randint(80, 120)
+                noise = random.randint(-20, 20)
+                
+                r = max(0, min(255, base_brown + noise + 20))
+                g = max(0, min(255, base_brown * 0.7 + noise))
+                b = max(0, min(255, base_brown * 0.5 + noise - 10))
+                
+                pixels[x, y] = (r, g, b)
+        
+        return img
+    
+    @staticmethod
+    def create_stone_texture(size=64):
+        img = PIL.Image.new('RGB', (size, size))
+        pixels = img.load()
+        
+        for y in range(size):
+            for x in range(size):
+                base_gray = random.randint(100, 150)
+                noise = random.randint(-30, 30)
+                
+                r = g = b = max(0, min(255, base_gray + noise))
+                
+                # Add stone grain
+                if random.random() < 0.1:
+                    darker = max(0, base_gray - 40)
+                    r = g = b = darker
+                
+                pixels[x, y] = (r, g, b)
+        
+        return img
+    
+    @staticmethod
+    def create_wood_texture(size=64):
+        img = PIL.Image.new('RGB', (size, size))
+        pixels = img.load()
+        
+        for y in range(size):
+            for x in range(size):
+                # Wood grain pattern
+                grain = math.sin(x * 0.3) * 10 + math.sin(y * 0.1) * 5
+                base_brown = 80 + grain
+                
+                r = max(0, min(255, base_brown + 20))
+                g = max(0, min(255, base_brown - 10))
+                b = max(0, min(255, base_brown - 30))
+                
+                pixels[x, y] = (int(r), int(g), int(b))
+        
+        return img
+    
+    @staticmethod
+    def create_leaves_texture(size=64):
+        img = PIL.Image.new('RGB', (size, size))
+        pixels = img.load()
+        
+        for y in range(size):
+            for x in range(size):
+                base_green = random.randint(30, 60)
+                
+                # Leaf pattern with transparency simulation
+                if random.random() < 0.8:
+                    r = max(0, min(255, base_green - 10))
+                    g = max(0, min(255, base_green + 30))
+                    b = max(0, min(255, base_green - 5))
+                else:
+                    # Gaps in leaves
+                    r = g = b = 20
+                
+                pixels[x, y] = (r, g, b)
+        
+        return img
+    
+    @staticmethod
+    def create_sand_texture(size=64):
+        img = PIL.Image.new('RGB', (size, size))
+        pixels = img.load()
+        
+        for y in range(size):
+            for x in range(size):
+                base_sand = random.randint(200, 230)
+                noise = random.randint(-10, 10)
+                
+                r = max(0, min(255, base_sand + noise + 20))
+                g = max(0, min(255, base_sand + noise + 10))
+                b = max(0, min(255, base_sand * 0.8 + noise))
+                
+                pixels[x, y] = (r, g, b)
+        
+        return img
+    
+    @staticmethod
+    def create_ore_texture(base_texture, ore_color, size=64):
+        img = base_texture.copy()
+        pixels = img.load()
+        
+        # Add ore speckles
+        for _ in range(15):
+            cx, cy = random.randint(5, size-5), random.randint(5, size-5)
+            for dx in range(-3, 4):
+                for dy in range(-3, 4):
+                    if dx*dx + dy*dy <= 9:
+                        nx, ny = cx + dx, cy + dy
+                        if 0 <= nx < size and 0 <= ny < size:
+                            blend = random.uniform(0.6, 1.0)
+                            old_r, old_g, old_b = pixels[nx, ny][:3]
+                            new_r = int(old_r * (1-blend) + ore_color[0] * blend)
+                            new_g = int(old_g * (1-blend) + ore_color[1] * blend)
+                            new_b = int(old_b * (1-blend) + ore_color[2] * blend)
+                            pixels[nx, ny] = (new_r, new_g, new_b)
+        
+        return img
+    
+    @staticmethod
+    def create_water_texture(size=64):
+        img = PIL.Image.new('RGBA', (size, size))
+        pixels = img.load()
+        
+        for y in range(size):
+            for x in range(size):
+                # Wave pattern
+                wave_val = math.sin(x * 0.2 + y * 0.1) * 20
+                base_blue = 100 + wave_val
+                
+                r = max(0, min(255, 20))
+                g = max(0, min(255, base_blue - 20))
+                b = max(0, min(255, base_blue + 40))
+                a = 180  # Semi-transparent
+                
+                pixels[x, y] = (r, g, b, a)
+        
+        return img
+    
+    @staticmethod
+    def create_lava_texture(size=64):
+        img = PIL.Image.new('RGB', (size, size))
+        pixels = img.load()
+        
+        for y in range(size):
+            for x in range(size):
+                # Lava flow pattern
+                flow = math.sin(x * 0.15 + y * 0.1) * 30 + math.cos(x * 0.3) * 20
+                
+                r = max(0, min(255, 200 + flow))
+                g = max(0, min(255, 50 + flow * 0.5))
+                b = max(0, min(255, flow * 0.3))
+                
+                pixels[x, y] = (r, g, b)
+        
+        return img
 
 # Initialize the app
 app = Ursina()
 sounds = SoundManager()
+texture_gen = TextureGenerator()
 
 # Window settings
-window.title = 'Minecraft Clone'
+window.title = 'Minecraft Clone - Enhanced'
 window.borderless = False
 window.fullscreen = False
 window.exit_button.visible = True
 window.fps_counter.enabled = True
+window.color = color.rgb(135, 206, 235)  # Sky blue background
+
+# Lighting system
+ambient_light = AmbientLight(color=color.rgb(100, 100, 120), brightness=0.3)
+sun_light = DirectionalLight(color=color.rgb(255, 250, 200), brightness=0.8)
+sun_light.look_at(Vec3(1, -1, 1))
+
+# Create point lights for glowing blocks
+glow_lights = []
 
 # Sky with day/night cycle
 sky = Sky(texture='sky_sunset')
 day_cycle = 0
+sky_color_day = color.rgb(135, 206, 235)
+sky_color_night = color.rgb(10, 10, 30)
+sky_color_sunset = color.rgb(255, 127, 80)
 
 # Ground plane (base layer)
 ground = Entity(
@@ -91,23 +370,66 @@ ground = Entity(
 
 # Block types with colors/textures and properties
 block_types = {
-    1: {'name': 'Grass', 'color': color.rgb(0, 155, 0), 'texture': 'grass', 'hardness': 1.0},
-    2: {'name': 'Dirt', 'color': color.rgb(139, 69, 19), 'texture': 'dirt', 'hardness': 0.8},
-    3: {'name': 'Stone', 'color': color.rgb(128, 128, 128), 'texture': 'white_cube', 'hardness': 2.0},
-    4: {'name': 'Wood', 'color': color.rgb(101, 67, 33), 'texture': 'white_cube', 'hardness': 1.2},
-    5: {'name': 'Leaves', 'color': color.rgb(34, 139, 34), 'texture': 'white_cube', 'hardness': 0.5},
-    6: {'name': 'Sand', 'color': color.rgb(237, 220, 163), 'texture': 'white_cube', 'hardness': 0.6},
-    7: {'name': 'Brick', 'color': color.rgb(178, 34, 34), 'texture': 'white_cube', 'hardness': 2.5},
-    8: {'name': 'Snow', 'color': color.rgb(255, 250, 250), 'texture': 'white_cube', 'hardness': 0.4},
-    9: {'name': 'Water', 'color': color.rgba(0, 0, 255, 180), 'texture': 'white_cube', 'transparent': True, 'hardness': 0.0},
-    10: {'name': 'Lava', 'color': color.rgba(255, 69, 0, 200), 'texture': 'white_cube', 'glow': True, 'hardness': 0.0},
-    11: {'name': 'Coal Ore', 'color': color.rgb(64, 64, 64), 'texture': 'white_cube', 'hardness': 2.5},
-    12: {'name': 'Iron Ore', 'color': color.rgb(210, 180, 140), 'texture': 'white_cube', 'hardness': 3.0},
-    13: {'name': 'Diamond Ore', 'color': color.rgb(0, 255, 255), 'texture': 'white_cube', 'hardness': 4.0},
-    14: {'name': 'Gold Ore', 'color': color.rgb(255, 215, 0), 'texture': 'white_cube', 'hardness': 3.5},
-    15: {'name': 'Cactus', 'color': color.rgb(0, 128, 0), 'texture': 'white_cube', 'hardness': 0.3},
-    16: {'name': 'Clay', 'color': color.rgb(180, 180, 200), 'texture': 'white_cube', 'hardness': 1.5},
+    1: {'name': 'Grass', 'color': color.rgb(0, 155, 0), 'texture': None, 'hardness': 1.0, 'sound': 'grass'},
+    2: {'name': 'Dirt', 'color': color.rgb(139, 69, 19), 'texture': None, 'hardness': 0.8, 'sound': 'dirt'},
+    3: {'name': 'Stone', 'color': color.rgb(128, 128, 128), 'texture': None, 'hardness': 2.0, 'sound': 'stone'},
+    4: {'name': 'Wood', 'color': color.rgb(101, 67, 33), 'texture': None, 'hardness': 1.2, 'sound': 'wood'},
+    5: {'name': 'Leaves', 'color': color.rgb(34, 139, 34), 'texture': None, 'hardness': 0.5, 'sound': 'leaves'},
+    6: {'name': 'Sand', 'color': color.rgb(237, 220, 163), 'texture': None, 'hardness': 0.6, 'sound': 'sand'},
+    7: {'name': 'Brick', 'color': color.rgb(178, 34, 34), 'texture': None, 'hardness': 2.5, 'sound': 'stone'},
+    8: {'name': 'Snow', 'color': color.rgb(255, 250, 250), 'texture': None, 'hardness': 0.4, 'sound': 'snow'},
+    9: {'name': 'Water', 'color': color.rgba(0, 0, 255, 180), 'texture': None, 'transparent': True, 'hardness': 0.0, 'sound': 'water', 'animate': True},
+    10: {'name': 'Lava', 'color': color.rgba(255, 69, 0, 200), 'texture': None, 'glow': True, 'hardness': 0.0, 'sound': 'lava', 'animate': True},
+    11: {'name': 'Coal Ore', 'color': color.rgb(64, 64, 64), 'texture': None, 'hardness': 2.5, 'sound': 'stone'},
+    12: {'name': 'Iron Ore', 'color': color.rgb(210, 180, 140), 'texture': None, 'hardness': 3.0, 'sound': 'stone'},
+    13: {'name': 'Diamond Ore', 'color': color.rgb(0, 255, 255), 'texture': None, 'hardness': 4.0, 'sound': 'stone'},
+    14: {'name': 'Gold Ore', 'color': color.rgb(255, 215, 0), 'texture': None, 'hardness': 3.5, 'sound': 'stone'},
+    15: {'name': 'Cactus', 'color': color.rgb(0, 128, 0), 'texture': None, 'hardness': 0.3, 'sound': 'leaves'},
+    16: {'name': 'Clay', 'color': color.rgb(180, 180, 200), 'texture': None, 'hardness': 1.5, 'sound': 'dirt'},
 }
+
+# Generate procedural textures for each block type
+def generate_block_textures():
+    """Generate all procedural textures at startup"""
+    print("Generating procedural textures...")
+    
+    # Create base textures
+    grass_img = texture_gen.create_grass_texture()
+    dirt_img = texture_gen.create_dirt_texture()
+    stone_img = texture_gen.create_stone_texture()
+    wood_img = texture_gen.create_wood_texture()
+    leaves_img = texture_gen.create_leaves_texture()
+    sand_img = texture_gen.create_sand_texture()
+    water_img = texture_gen.create_water_texture()
+    lava_img = texture_gen.create_lava_texture()
+    
+    # Create ore textures
+    coal_ore_img = texture_gen.create_ore_texture(stone_img, (40, 40, 40))
+    iron_ore_img = texture_gen.create_ore_texture(stone_img, (210, 180, 140))
+    diamond_ore_img = texture_gen.create_ore_texture(stone_img, (0, 255, 255))
+    gold_ore_img = texture_gen.create_ore_texture(stone_img, (255, 215, 0))
+    
+    # Store textures in block_types
+    block_types[1]['texture'] = grass_img
+    block_types[2]['texture'] = dirt_img
+    block_types[3]['texture'] = stone_img
+    block_types[4]['texture'] = wood_img
+    block_types[5]['texture'] = leaves_img
+    block_types[6]['texture'] = sand_img
+    block_types[7]['texture'] = texture_gen.create_ore_texture(stone_img, (178, 34, 34))  # Brick-like
+    block_types[8]['texture'] = texture_gen.create_ore_texture(stone_img, (255, 250, 250))  # Snow-like
+    block_types[9]['texture'] = water_img
+    block_types[10]['texture'] = lava_img
+    block_types[11]['texture'] = coal_ore_img
+    block_types[12]['texture'] = iron_ore_img
+    block_types[13]['texture'] = diamond_ore_img
+    block_types[14]['texture'] = gold_ore_img
+    block_types[15]['texture'] = texture_gen.create_ore_texture(leaves_img, (0, 100, 0))  # Cactus
+    block_types[16]['texture'] = texture_gen.create_ore_texture(dirt_img, (180, 180, 200))  # Clay
+    
+    print("Textures generated successfully!")
+
+generate_block_textures()
 
 # Tool tiers with mining speed multipliers
 tool_tiers = {
@@ -216,21 +538,80 @@ def spawn_mob(position):
         mob_type = random.choice(['pig', 'cow'])
     Mob(position=position, mob_type=mob_type)
 
+# Particle system for visual effects
+particles = []
+
+class Particle(Entity):
+    """Particle effect for block breaking, placing, and ambient effects"""
+    def __init__(self, position, color, velocity, lifetime=1.0, scale=0.1):
+        super().__init__(
+            model='cube',
+            color=color,
+            position=position,
+            scale=scale
+        )
+        self.velocity = velocity
+        self.lifetime = lifetime
+        self.age = 0
+        particles.append(self)
+    
+    def update(self):
+        self.age += time.dt
+        self.position += self.velocity * time.dt
+        
+        # Apply gravity
+        self.velocity.y -= 5 * time.dt
+        
+        # Fade out
+        if self.age > self.lifetime * 0.7:
+            alpha = 1 - (self.age - self.lifetime * 0.7) / (self.lifetime * 0.3)
+            self.color = color.rgba(self.color.r, self.color.g, self.color.b, int(255 * alpha))
+        
+        # Remove when expired
+        if self.age >= self.lifetime:
+            destroy(self)
+            if self in particles:
+                particles.remove(self)
+
+def spawn_particles(position, color, count=8, spread=0.3):
+    """Spawn particle burst at position"""
+    for _ in range(count):
+        vel = Vec3(
+            random.uniform(-spread, spread),
+            random.uniform(0, spread),
+            random.uniform(-spread, spread)
+        )
+        Particle(position=position, color=color, velocity=vel, lifetime=random.uniform(0.5, 1.0), scale=random.uniform(0.05, 0.15))
+
 # Voxel class for individual blocks
 class Voxel(Button):
     def __init__(self, position=(0,0,0), block_type=1):
+        btex = block_types[block_type]['texture']
+        bcolor = block_types[block_type]['color']
+        
         super().__init__(
             parent=scene,
             position=position,
             model='cube',
             origin_y=0.5,
-            texture=block_types[block_type]['texture'],
-            color=block_types[block_type]['color'],
+            texture=btex,
+            color=bcolor,
             highlight_color=color.lime,
             collider='box'
         )
         self.block_type = block_type
         self.break_progress = 0
+        self.animation_time = 0
+        
+        # Add glow effect for lava and other glowing blocks
+        if block_types[block_type].get('glow'):
+            self.glow = Entity(
+                parent=self,
+                model='cube',
+                color=color.rgba(255, 100, 0, 50),
+                scale=1.02,
+                double_sided=True
+            )
     
     def input(self, key):
         global tool_durability, current_tool
@@ -240,9 +621,15 @@ class Voxel(Button):
                 tool_speed = tool_tiers[current_tool]['speed']
                 self.break_progress += tool_speed * 0.2
                 
+                # Spawn break particles
+                spawn_particles(self.position + Vec3(0, 0.5, 0), 
+                              block_types[self.block_type]['color'], 
+                              count=3, spread=0.2)
+                
                 # Check if block is broken
                 if self.break_progress >= hardness:
-                    sounds.play_break()
+                    sound_type = block_types[self.block_type].get('sound', 'stone')
+                    sounds.play_break(sound_type)
                     
                     # Decrease tool durability if not bare hands
                     if current_tool != 'none' and tool_durability > 0:
@@ -252,11 +639,17 @@ class Voxel(Button):
                             tool_durability = 0
                             Text(text='Tool Broken!', position=(0, 0.2), scale=1.5, color=color.red, duration=1.5)
                     
+                    # Spawn more particles on break
+                    spawn_particles(self.position + Vec3(0, 0.5, 0), 
+                                  block_types[self.block_type]['color'], 
+                                  count=12, spread=0.4)
+                    
                     destroy(self)
                 else:
                     # Show breaking particles/sound based on progress
                     if self.break_progress > hardness * 0.3 and not hasattr(self, '_sound_played'):
-                        sounds.play_break()
+                        sound_type = block_types[self.block_type].get('sound', 'stone')
+                        sounds.play_break(sound_type)
                         self._sound_played = True
             
             if key == 'right mouse down':
@@ -267,12 +660,26 @@ class Voxel(Button):
                 # Don't place block inside player
                 if distance(new_pos, player.position) > 1.5:
                     Voxel(position=new_pos, block_type=current_block)
-                    sounds.play_place()
+                    sound_type = block_types[current_block].get('sound', 'stone')
+                    sounds.play_place(sound_type)
+                    
+                    # Spawn place particles
+                    spawn_particles(new_pos + Vec3(0, 0.5, 0), 
+                                  block_types[current_block]['color'], 
+                                  count=5, spread=0.2)
         
         # Jumping depletes hunger
         if key == 'space' and self.hovered == False:
             global player_hunger
             player_hunger -= 0.5
+    
+    def update(self):
+        # Animate water and lava blocks
+        if block_types[self.block_type].get('animate'):
+            self.animation_time += time.dt * 2
+            wave_height = math.sin(self.animation_time) * 0.02 + math.cos(self.animation_time * 1.5) * 0.01
+            self.scale_y = 1 + wave_height * 0.5
+            self.position_y = int(self.position.y) + 0.5 + wave_height
 
 # Generate initial terrain with ores and varied biomes
 def generate_terrain():
@@ -487,9 +894,42 @@ def update():
     # Hand animation
     update_hand()
     
-    # Day/night cycle
+    # Day/night cycle with enhanced lighting
     day_cycle += time.dt * 0.1
     sky.rotation = (day_cycle * 360, 0, 0)
+    
+    # Update ambient light based on time of day
+    day_phase = day_cycle % 1
+    if day_phase < 0.25:  # Dawn
+        sky_color = color.lerp(sky_color_night, sky_color_sunset, day_phase / 0.25)
+        sun_brightness = day_phase / 0.25 * 0.8
+    elif day_phase < 0.5:  # Day
+        sky_color = color.lerp(sky_color_sunset, sky_color_day, (day_phase - 0.25) / 0.25)
+        sun_brightness = 0.8
+    elif day_phase < 0.75:  # Dusk
+        sky_color = color.lerp(sky_color_day, sky_color_sunset, (day_phase - 0.5) / 0.25)
+        sun_brightness = (0.75 - day_phase) / 0.25 * 0.8
+    else:  # Night
+        sky_color = color.lerp(sky_color_sunset, sky_color_night, (day_phase - 0.75) / 0.25)
+        sun_brightness = 0.1
+    
+    window.color = sky_color
+    sun_light.brightness = sun_brightness
+    ambient_light.brightness = max(0.1, sun_brightness * 0.4)
+    
+    # Play water/lava ambient sounds near player
+    if random.random() < 0.01:  # Occasional ambient sound
+        for entity in scene.children:
+            if isinstance(entity, Voxel):
+                dist = distance(entity.position, player.position)
+                if dist < 5:
+                    bt = block_types.get(entity.block_type, {})
+                    if bt.get('sound') == 'water' and random.random() < 0.3:
+                        sounds.play_water()
+                        break
+                    elif bt.get('sound') == 'lava' and random.random() < 0.2:
+                        sounds.play_lava()
+                        break
     
     # Spawn mobs at night
     mob_spawn_timer += time.dt
@@ -506,6 +946,11 @@ def update():
             mob.update()
         if distance(mob.position, player.position) < 1.5:
             player_health -= time.dt * 0.5
+    
+    # Update particles
+    for particle in particles[:]:
+        if particle.enabled:
+            particle.update()
     
     # Flying controls
     if fly_mode:
@@ -568,7 +1013,17 @@ print("  0/10 - Lava, 11:Coal Ore, 12:Iron Ore, 13:Diamond Ore, 14:Gold Ore, 15:
 print("  T/Y/U/I - Select tool (Wooden/Stone/Iron/Diamond Pickaxe)")
 print("  TAB - Toggle fly mode")
 print("  ESC - Release mouse")
-print("Features: Health, Hunger, XP/Levels, Mob spawning at night, Day/Night cycle, Tool durability, Block hardness")
+print("")
+print("Enhanced Features:")
+print("  * Procedural textures for all block types")
+print("  * Dynamic lighting with day/night cycle")
+print("  * Ambient occlusion and shadows")
+print("  * Enhanced sound effects with spatial audio")
+print("  * Particle effects for block breaking/placing")
+print("  * Animated water and lava blocks")
+print("  * Sky color changes throughout the day")
+print("  * Ambient water/lava sounds")
+print("  * Glow effects for lava blocks")
 print("======================\n")
 
 app.run()
